@@ -1,5 +1,6 @@
 """Mixin for Image build support."""
 
+import io
 import json
 import logging
 import pathlib
@@ -7,7 +8,6 @@ import random
 import re
 import shutil
 import tempfile
-from typing import Any
 from collections.abc import Iterator
 
 import itertools
@@ -23,7 +23,37 @@ class BuildMixin:
     """Class providing build method for ImagesManager."""
 
     # pylint: disable=too-many-locals,too-many-branches,too-few-public-methods,too-many-statements
-    def build(self, **kwargs) -> tuple[Image, Iterator[bytes]]:
+    def build(
+        self,
+        path: pathlib.Path = None,
+        fileobj: [pathlib.Path | io.BytesIO] = None,
+        tag: str = None,
+        quiet: bool = None,
+        remote: str = None,
+        nocache: bool = None,
+        rm: bool = None,
+        timeout: int = None,
+        custom_context: bool = None,
+        pull: bool = None,
+        forcerm: bool = None,
+        dockerfile: str = f".containerfile.{random.getrandbits(160):x}",
+        buildargs: dict[str, str] = None,
+        container_limits: dict[str, [int | str]] = None,
+        shmsize: int = None,
+        labels: dict[str, str] = None,
+        cache_from: list[str] = None,
+        target: str = None,
+        network_mode: str = None,
+        squash: bool = None,
+        extra_hosts: dict[str, str] = None,
+        platform: str = None,
+        http_proxy: bool = None,
+        layers: bool = True,
+        output: str = None,
+        outputformat: str = "application/vnd.oci.image.manifest.v1+json",
+        volumes: dict[str, dict[str, [str | list[str]]]] = None,
+        **kwargs,
+    ) -> tuple[Image, Iterator[bytes]]:
         """Returns built image.
 
         Keyword Args:
@@ -90,6 +120,8 @@ class BuildMixin:
                     }
 
 
+        All unsupported kwargs are silently ignored.
+
         Returns:
             first item is the podman.domain.images.Image built
 
@@ -101,16 +133,68 @@ class BuildMixin:
             TypeError: when neither path nor fileobj is not specified
         """
 
-        params = self._render_params(kwargs)
+        if path is None and fileobj is None and remote is None:
+            raise TypeError("Either path, fileobj or remote must be provided.")
 
-        body = None
-        path = None
-        if kwargs.get("custom_context"):
-            if "fileobj" not in kwargs:
+        if "gzip" in kwargs and "encoding" in kwargs:
+            raise PodmanError("Custom encoding not supported when gzip enabled.")
+
+        params = {
+            "dockerfile": dockerfile,
+            "forcerm": forcerm,
+            "httpproxy": http_proxy,
+            "networkmode": network_mode,
+            "nocache": nocache,
+            "platform": platform,
+            "pull": pull,
+            "q": quiet,
+            "remote": remote,
+            "rm": rm,
+            "shmsize": shmsize,
+            "squash": squash,
+            "t": tag,
+            "target": target,
+            "layers": layers,
+            "output": output,
+            "outputformat": outputformat,
+        }
+
+        if buildargs:
+            params["buildargs"] = json.dumps(buildargs)
+        if cache_from:
+            params["cachefrom"] = json.dumps(cache_from)
+
+        if container_limits:
+            params["cpuperiod"] = container_limits.get("cpuperiod")
+            params["cpuquota"] = container_limits.get("cpuquota")
+            params["cpusetcpus"] = container_limits.get("cpusetcpus")
+            params["cpushares"] = container_limits.get("cpushares")
+            params["memory"] = container_limits.get("memory")
+            params["memswap"] = container_limits.get("memswap")
+
+        if extra_hosts:
+            params["extrahosts"] = json.dumps(extra_hosts)
+        if labels:
+            params["labels"] = json.dumps(labels)
+
+        if volumes:
+            params["volume"] = []
+            for hostdir, target in volumes.items():
+                mode = target.get('mode', [])
+                binddir = target.get('bind')
+                if binddir is None:
+                    raise ValueError(f"volume {hostdir} 'bind' value not defined")
+                if not isinstance(mode, list):
+                    raise ValueError(f"volume {hostdir} 'mode' value should be a list")
+                mode_str = ",".join(mode)
+                params["volume"].append(f"{hostdir}:{target['bind']}:{mode_str}")
+
+        if custom_context:
+            if fileobj is None:
                 raise PodmanError(
                     "Custom context requires fileobj to be set to a binary file-like object containing a build-directory tarball."
                 )
-            if "dockerfile" not in kwargs:
+            if dockerfile is None:
                 # TODO: Scan the tarball for either a Dockerfile or a Containerfile.
                 # This could be slow if the tarball is large,
                 # and could require buffering/copying the tarball if `fileobj` is not seekable.
@@ -118,27 +202,27 @@ class BuildMixin:
                 raise PodmanError(
                     "Custom context requires specifying the name of the Dockerfile (typically 'Dockerfile' or 'Containerfile')."
                 )
-            body = kwargs["fileobj"]
-        elif "fileobj" in kwargs:
+            body = io.BytesIO(fileobj.getbuffer())  # will be closed after the POST request
+        elif fileobj:
             path = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
-            filename = pathlib.Path(path.name) / params["dockerfile"]
+            filename = pathlib.Path(path.name) / dockerfile
 
             with open(filename, "w", encoding='utf-8') as file:
-                shutil.copyfileobj(kwargs["fileobj"], file)
+                shutil.copyfileobj(fileobj, file)
             body = api.create_tar(anchor=path.name, gzip=kwargs.get("gzip", False))
-        elif "path" in kwargs:
-            filename = pathlib.Path(kwargs["path"]) / params["dockerfile"]
+        elif path:
+            filename = path / dockerfile
             # The Dockerfile will be copied into the context_dir if needed
-            params["dockerfile"] = api.prepare_containerfile(kwargs["path"], str(filename))
+            params["dockerfile"] = api.prepare_containerfile(path, str(filename))
 
-            excludes = api.prepare_containerignore(kwargs["path"])
-            body = api.create_tar(
-                anchor=kwargs["path"], exclude=excludes, gzip=kwargs.get("gzip", False)
-            )
+            excludes = api.prepare_containerignore(path)
+            body = api.create_tar(anchor=path, exclude=excludes, gzip=kwargs.get("gzip", False))
+        elif remote:
+            body = None
 
         post_kwargs = {}
-        if kwargs.get("timeout"):
-            post_kwargs["timeout"] = float(kwargs.get("timeout"))
+        if timeout:
+            post_kwargs["timeout"] = float(timeout)
 
         response = self.client.post(
             "/build",
@@ -176,71 +260,3 @@ class BuildMixin:
             return self.get(image_id), report_stream
 
         raise BuildError(unknown or "Unknown", report_stream)
-
-    @staticmethod
-    def _render_params(kwargs) -> dict[str, list[Any]]:
-        """Map kwargs to query parameters.
-
-        All unsupported kwargs are silently ignored.
-        """
-        if "path" not in kwargs and "fileobj" not in kwargs:
-            raise TypeError("Either path or fileobj must be provided.")
-
-        if "gzip" in kwargs and "encoding" in kwargs:
-            raise PodmanError("Custom encoding not supported when gzip enabled.")
-
-        params = {
-            "dockerfile": kwargs.get("dockerfile", f".containerfile.{random.getrandbits(160):x}"),
-            "forcerm": kwargs.get("forcerm"),
-            "httpproxy": kwargs.get("http_proxy"),
-            "networkmode": kwargs.get("network_mode"),
-            "nocache": kwargs.get("nocache"),
-            "platform": kwargs.get("platform"),
-            "pull": kwargs.get("pull"),
-            "q": kwargs.get("quiet"),
-            "remote": kwargs.get("remote"),
-            "rm": kwargs.get("rm"),
-            "shmsize": kwargs.get("shmsize"),
-            "squash": kwargs.get("squash"),
-            "t": kwargs.get("tag"),
-            "target": kwargs.get("target"),
-            "layers": kwargs.get("layers", True),
-            "output": kwargs.get("output"),
-            "outputformat": kwargs.get(
-                "outputformat", "application/vnd.oci.image.manifest.v1+json"
-            ),
-            "volume": [],
-        }
-
-        if "buildargs" in kwargs:
-            params["buildargs"] = json.dumps(kwargs.get("buildargs"))
-        if "cache_from" in kwargs:
-            params["cachefrom"] = json.dumps(kwargs.get("cache_from"))
-
-        if "container_limits" in kwargs:
-            params["cpuperiod"] = kwargs["container_limits"].get("cpuperiod")
-            params["cpuquota"] = kwargs["container_limits"].get("cpuquota")
-            params["cpusetcpus"] = kwargs["container_limits"].get("cpusetcpus")
-            params["cpushares"] = kwargs["container_limits"].get("cpushares")
-            params["memory"] = kwargs["container_limits"].get("memory")
-            params["memswap"] = kwargs["container_limits"].get("memswap")
-
-        if "extra_hosts" in kwargs:
-            params["extrahosts"] = json.dumps(kwargs.get("extra_hosts"))
-        if "labels" in kwargs:
-            params["labels"] = json.dumps(kwargs.get("labels"))
-
-        volumes = kwargs.get("volumes")
-        if volumes:
-            for hostdir, target in volumes.items():
-                mode = target.get('mode', [])
-                binddir = target.get('bind')
-                if binddir is None:
-                    raise ValueError("'bind' value not defined")
-                if not isinstance(mode, list):
-                    raise ValueError("'mode' value should be a list")
-                mode_str = ",".join(mode)
-                params["volume"].append(f"{hostdir}:{target['bind']}:{mode_str}")
-
-        # Remove any unset parameters
-        return dict(filter(lambda i: i[1] is not None, params.items()))

@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 import random
 import tarfile
 import tempfile
@@ -193,7 +194,7 @@ ENV foo=bar
             file = open(tmp_file, 'w')
             file.write(container_file)
             file.close()
-            self.client.images.build(dockerfile=tmp_file, tag="test-img", path=".")
+            self.client.images.build(dockerfile=Path(tmp_file), tag="test-img", path=".")
 
             # get existing number of containers and volumes
             existing_containers = self.client.containers.list(all=True)
