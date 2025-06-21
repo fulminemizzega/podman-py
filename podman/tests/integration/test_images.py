@@ -19,7 +19,9 @@ import json
 import platform
 import tarfile
 import types
+import random
 import unittest
+from tempfile import NamedTemporaryFile
 
 import podman.tests.integration.base as base
 from podman import PodmanClient
@@ -157,6 +159,25 @@ class ImagesIntegrationTest(base.IntegrationTest):
             if "Using cache" in parsed:
                 break
         self.assertEqual(parsed.split()[3], image.id)
+
+    def test_build_volume(self):
+        file = self.enterContext(NamedTemporaryFile(mode="w+"))
+        content = f"test {random.getrandbits(160):x}"
+        file.write(content)
+        file.seek(0)
+        containerfile_str = "\n".join(
+            [
+                "FROM quay.io/libpod/alpine_labels:latest",
+                f"RUN cp /host{file.name} /copy",
+                """CMD ["cat", "/copy"]""",
+            ]
+        )
+        buffer = io.StringIO(containerfile_str)
+
+        vol_dict = {f"{file.name}": {"bind": f"/host{file.name}", "mode": ["ro", "Z"]}}
+        image, stream = self.client.images.build(fileobj=buffer, volumes=vol_dict)
+        cntr = self.client.containers.run(image, remove=True, stdout=True)
+        self.assertEqual(cntr.decode(), content)
 
     def test_build_with_context(self):
         context = io.BytesIO()

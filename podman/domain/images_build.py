@@ -67,6 +67,28 @@ class BuildMixin:
             output (str) - specifies if any custom build output is selected for following build.
             outputformat (str) - The format of the output image's manifest and configuration data.
                 Default to "application/vnd.oci.image.manifest.v1+json" (OCI format).
+            volumes (dict[str, dict[str, Union[str, list]]])
+                Mount a host directory into containers when executing RUN instructions during the build.
+                The key is the host path and the value is a dictionary with the keys:
+
+                - bind: The path to mount the volume inside the container
+                - mode: One or multiple of [ro|rw],[z|Z|O],[U],[[r]shared|[r]slave|[r]private]
+                        By default, the volumes are mounted read-write
+
+                For example:
+
+                    {
+
+                        '/etc/host':
+
+                            {'bind': '/etc/host', 'mode': 'ro'},
+
+                        '/tmp/cache':
+
+                            {'bind': '/var/cache/libdnf5', 'mode': ['rw', 'z']},
+
+                    }
+
 
         Returns:
             first item is the podman.domain.images.Image built
@@ -187,6 +209,7 @@ class BuildMixin:
             "outputformat": kwargs.get(
                 "outputformat", "application/vnd.oci.image.manifest.v1+json"
             ),
+            "volume": [],
         }
 
         if "buildargs" in kwargs:
@@ -206,6 +229,18 @@ class BuildMixin:
             params["extrahosts"] = json.dumps(kwargs.get("extra_hosts"))
         if "labels" in kwargs:
             params["labels"] = json.dumps(kwargs.get("labels"))
+
+        volumes = kwargs.get("volumes")
+        if volumes:
+            for hostdir, target in volumes.items():
+                mode = target.get('mode', [])
+                binddir = target.get('bind')
+                if binddir is None:
+                    raise ValueError("'bind' value not defined")
+                if not isinstance(mode, list):
+                    raise ValueError("'mode' value should be a list")
+                mode_str = ",".join(mode)
+                params["volume"].append(f"{hostdir}:{target['bind']}:{mode_str}")
 
         # Remove any unset parameters
         return dict(filter(lambda i: i[1] is not None, params.items()))
