@@ -61,6 +61,12 @@ class BuildMixin:
             fileobj – A file object to use as the Dockerfile. (Or an IO object)
             tag (str) – A tag to add to the final image
             quiet (bool) – Whether to return the status
+            remote (str) - A Git repository URI or HTTP/HTTPS context URI
+                - If the URI is a text file, it is used as Containerfile
+                - If the URI points to a tarball, the file is downloaded by the daemon and
+                  its content is used as context for the build
+                - If the URI points to a tarball and the dockerfile parameter is specified,
+                  there must be a file with the corresponding path inside the tarball
             nocache (bool) – Don’t use the cache when set to True
             rm (bool) – Remove intermediate containers. Default True
             timeout (int) – HTTP timeout
