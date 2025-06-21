@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 import json
 import unittest
 
@@ -88,7 +89,7 @@ class TestBuildCase(unittest.TestCase):
             )
 
             image, logs = self.client.images.build(
-                path="/tmp/context_dir",
+                path=Path("/tmp/context_dir"),
                 tag="latest",
                 buildargs={
                     "BUILD_DATE": "January 1, 1970",
@@ -125,7 +126,7 @@ class TestBuildCase(unittest.TestCase):
             )
 
             with self.assertRaises(BuildError) as e:
-                self.client.images.build(path="/tmp/context_dir")
+                self.client.images.build(path=Path("/tmp/context_dir"))
             self.assertEqual(e.exception.msg, "We do not need any stinking badges.")
 
     @requests_mock.Mocker()
@@ -138,7 +139,7 @@ class TestBuildCase(unittest.TestCase):
     def test_build_encoding(self, mock):
         mock.post(tests.LIBPOD_URL + "/images/build")
         with self.assertRaises(DockerException):
-            self.client.images.build(path="/root", gzip=True, encoding="utf-8")
+            self.client.images.build(path=Path("/root"), gzip=True, encoding="utf-8")
 
 
 if __name__ == '__main__':
