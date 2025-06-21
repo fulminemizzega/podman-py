@@ -175,6 +175,34 @@ class TestBuildCase(unittest.TestCase):
             img, _ = self.client.images.build(path=Path("/tmp/context_dir"))
         assert img.id == "unittest"
 
+    @requests_mock.Mocker()
+    def test_build_remote(self, mock):
+        stream = good_stream
+        image_id = good_image_id
+        buffer = io.StringIO()
+        for entry in stream:
+            buffer.write(json.dumps(entry))
+            buffer.write("\n")
+
+        mock.post(
+            tests.LIBPOD_URL + "/build?remote=https://github.com/containers/PodmanHello.git"
+            "&labels=%7B%22Unittest%22%3A+%22true%22%7D",
+            text=buffer.getvalue(),
+        )
+        mock.get(
+            tests.LIBPOD_URL + f"/images/{image_id}/json",
+            json={
+                "Id": f"{image_id}",
+                "Labels": {"Unittest": "true"},
+            },
+        )
+        image, logs = self.client.images.build(
+            remote="https://github.com/containers/PodmanHello.git", labels={"Unittest": "true"}
+        )
+        self.assertIsInstance(image, Image)
+        self.assertEqual(image.id, image_id)
+        self.assertIsInstance(logs, Iterable)
+
 
 if __name__ == '__main__':
     unittest.main()
