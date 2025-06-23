@@ -168,7 +168,7 @@ class BuildMixin:
             raise PodmanError("Custom encoding not supported when gzip enabled.")
 
         params = {
-            "dockerfile": kwargs.get("dockerfile"),
+            "dockerfile": kwargs.get("dockerfile", f".containerfile.{random.getrandbits(160):x}"),
             "forcerm": kwargs.get("forcerm"),
             "httpproxy": kwargs.get("http_proxy"),
             "networkmode": kwargs.get("network_mode"),
@@ -182,9 +182,11 @@ class BuildMixin:
             "squash": kwargs.get("squash"),
             "t": kwargs.get("tag"),
             "target": kwargs.get("target"),
-            "layers": kwargs.get("layers"),
+            "layers": kwargs.get("layers", True),
             "output": kwargs.get("output"),
-            "outputformat": kwargs.get("outputformat"),
+            "outputformat": kwargs.get(
+                "outputformat", "application/vnd.oci.image.manifest.v1+json"
+            ),
         }
 
         if "buildargs" in kwargs:
@@ -204,17 +206,6 @@ class BuildMixin:
             params["extrahosts"] = json.dumps(kwargs.get("extra_hosts"))
         if "labels" in kwargs:
             params["labels"] = json.dumps(kwargs.get("labels"))
-
-        def default(value, def_value):
-            return def_value if value is None else value
-
-        params["outputformat"] = default(
-            params["outputformat"], "application/vnd.oci.image.manifest.v1+json"
-        )
-        params["layers"] = default(params["layers"], True)
-        params["dockerfile"] = default(
-            params["dockerfile"], f".containerfile.{random.getrandbits(160):x}"
-        )
 
         # Remove any unset parameters
         return dict(filter(lambda i: i[1] is not None, params.items()))
