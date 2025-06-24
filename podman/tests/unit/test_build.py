@@ -130,13 +130,13 @@ class TestBuildCase(unittest.TestCase):
 
     @requests_mock.Mocker()
     def test_build_no_context(self, mock):
-        mock.post(tests.LIBPOD_URL + "/images/build")
+        mock.post(tests.LIBPOD_URL + "/build")
         with self.assertRaises(TypeError):
             self.client.images.build()
 
     @requests_mock.Mocker()
     def test_build_encoding(self, mock):
-        mock.post(tests.LIBPOD_URL + "/images/build")
+        mock.post(tests.LIBPOD_URL + "/build")
         with self.assertRaises(DockerException):
             self.client.images.build(path="/root", gzip=True, encoding="utf-8")
 
